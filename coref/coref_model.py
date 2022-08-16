@@ -27,6 +27,7 @@ from coref.tokenizer_customization import TOKENIZER_FILTERS, TOKENIZER_MAPS
 from coref.utils import GraphNode
 from coref.word_encoder import WordEncoder
 
+import pdb
 
 class CorefModel:  # pylint: disable=too-many-instance-attributes
     """Combines all coref modules together to find coreferent spans.
@@ -215,7 +216,8 @@ class CorefModel:  # pylint: disable=too-many-instance-attributes
         # Encode words with bert
         # words           [n_words, span_emb]
         # cluster_ids     [n_words]
-        words, cluster_ids = self.we(doc, self._bertify(doc))
+        bert_embs, bert_atten = self._bertify(doc)
+        words, cluster_ids = self.we(doc, bert_embs)
 
         # Obtain bilinear scores and leave only top-k antecedents for each word
         # top_rough_scores  [n_words, n_ants]
@@ -346,16 +348,21 @@ class CorefModel:  # pylint: disable=too-many-instance-attributes
 
         # Obtain bert output for selected batches only
         attention_mask = (subwords_batches != self.tokenizer.pad_token_id)
-        out, _ = self.bert(
+        out_dict = self.bert(
             subwords_batches_tensor,
             attention_mask=torch.tensor(
                 attention_mask, device=self.config.device),
-            return_dict=False)
+            output_attentions=True)
 
-        del _
+        out = out_dict['last_hidden_state']
+        attentions = out_dict['attentions'] 
 
+        out = out[subword_mask_tensor]
+        attentions = [layer[:,:,subword_mask_tensor[0],:][:,:,:,subword_mask_tensor[0]]
+            for layer in attentions]       
+ 
         # [n_subwords, bert_emb]
-        return out[subword_mask_tensor]
+        return out, attentions
 
     def _build_model(self):
         self.bert, self.tokenizer = bert.load_bert(self.config)

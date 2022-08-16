@@ -1,4 +1,4 @@
-""" Describes WordEncoder. Extracts mention vectors from bert-encoded text.
+""" Describes AttenEncoder. Extracts attention from bert-encoded text.
 """
 
 from typing import Tuple
@@ -8,10 +8,9 @@ import torch
 from coref.config import Config
 from coref.const import Doc
 
-import pdb
 
-class WordEncoder(torch.nn.Module):  # pylint: disable=too-many-instance-attributes
-    """ Receives bert contextual embeddings of a text, extracts all the
+class AttenEncoder(torch.nn.Module):  # pylint: disable=too-many-instance-attributes
+    """ Receives bert attention of a text, extracts all the
     possible mentions in that text. """
 
     def __init__(self, features: int, config: Config):
@@ -32,7 +31,7 @@ class WordEncoder(torch.nn.Module):  # pylint: disable=too-many-instance-attribu
 
     def forward(self,  # type: ignore  # pylint: disable=arguments-differ  #35566 in pytorch
                 doc: Doc,
-                x: torch.Tensor,
+                x: Tuple[torch.Tensor, ...]
                 ) -> Tuple[torch.Tensor, ...]:
         """
         Extracts word representations from text.
@@ -81,13 +80,11 @@ class WordEncoder(torch.nn.Module):  # pylint: disable=too-many-instance-attribu
         attn_mask = torch.arange(0, n_subtokens, device=self.device).expand((n_words, n_subtokens))
         attn_mask = ((attn_mask >= word_starts.unsqueeze(1))
                      * (attn_mask < word_ends.unsqueeze(1)))
-        pdb.set_trace()
         attn_mask = torch.log(attn_mask.to(torch.float))
 
         attn_scores = self.attn(bert_out).T  # [1, n_subtokens]
         attn_scores = attn_scores.expand((n_words, n_subtokens))
         attn_scores = attn_mask + attn_scores
-        pdb.set_trace()
         del attn_mask
         return torch.softmax(attn_scores, dim=1)  # [n_words, n_subtokens]
 
