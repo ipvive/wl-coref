@@ -98,6 +98,10 @@ conll_log_dir = "data/conll_logs"
 # The sections listed here do not need to make use of all config variables
 # If a variable is omitted, its default value will be used instead
 
+[roberta_cpu]
+bert_model = "roberta-large"
+device = "cpu:0"
+
 [roberta]
 bert_model = "roberta-large"
 
