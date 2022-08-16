@@ -449,7 +449,11 @@ class CorefModel:  # pylint: disable=too-many-instance-attributes
                 self._docs[path] = self._tokenize_docs(path)
                 with open(cache_filename, mode="wb") as cache_f:
                     pickle.dump(self._docs[path], cache_f)
-        return self._docs[path]
+        short_docs = [doc for doc in self._docs[path] if 
+                    len(doc["subwords"]) < self.config.bert_window_size - 2]
+        print(f"Kept only {len(short_docs)}/{len(self._docs[path])} of docs")
+        return short_docs
+
 
     @staticmethod
     def _get_ground_truth(cluster_ids: torch.Tensor,
