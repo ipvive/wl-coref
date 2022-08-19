@@ -8,30 +8,33 @@ import torch
 from coref.config import Config
 from coref.const import Doc
 
+import pdb
 
-class AttenEncoder(torch.nn.Module):  # pylint: disable=too-many-instance-attributes
+class AttnEncoder(torch.nn.Module):  # pylint: disable=too-many-instance-attributes
     """ Receives bert attention of a text, extracts all the
     possible mentions in that text. """
 
-    def __init__(self, features: int, config: Config):
+    def __init__(self, dropout_rate,
+                       num_heads,
+                       num_layers):
         """
         Args:
             features (int): the number of featues in the input embeddings
             config (Config): the configuration of the current session
         """
         super().__init__()
-        self.attn = torch.nn.Linear(in_features=features, out_features=1)
-        self.dropout = torch.nn.Dropout(config.dropout_rate)
+        self.coref = torch.nn.Linear(in_features=num_layers * num_heads, out_features=1)
+        self.dropout = torch.nn.Dropout(dropout_rate)
 
     @property
     def device(self) -> torch.device:
         """ A workaround to get current device (which is assumed to be the
         device of the first parameter of one of the submodules) """
-        return next(self.attn.parameters()).device
+        return next(self.coref.parameters()).device
 
     def forward(self,  # type: ignore  # pylint: disable=arguments-differ  #35566 in pytorch
                 doc: Doc,
-                x: Tuple[torch.Tensor, ...]
+                attns: torch.Tensor
                 ) -> Tuple[torch.Tensor, ...]:
         """
         Extracts word representations from text.
@@ -50,43 +53,45 @@ class AttenEncoder(torch.nn.Module):  # pylint: disable=too-many-instance-attrib
         starts = word_boundaries[:, 0]
         ends = word_boundaries[:, 1]
 
-        # [n_mentions, features]
-        words = self._attn_scores(x, starts, ends).mm(x)
+        s = attns.shape
+        attns = torch.reshape(attns, (s[0], s[1]*s[2], s[3], s[4]))
+        attns = torch.transpose(attns, 1, 3)
+        attns = torch.transpose(attns, 1, 2)
+        
+        subword_coref_attn = torch.squeeze(self.coref(attns), dim=-1)
 
-        words = self.dropout(words)
+        sub_to_word = self._subword_to_word(starts, ends, s[-1])
 
-        return (words, self._cluster_ids(doc))
+        word_coref_attn = torch.matmul(sub_to_word, subword_coref_attn)
+        word_coref_attn = torch.matmul(word_coref_attn, sub_to_word.t())
 
-    def _attn_scores(self,
-                     bert_out: torch.Tensor,
+        return (word_coref_attn, self._cluster_ids(doc))
+
+    def _subword_to_word(self,
                      word_starts: torch.Tensor,
-                     word_ends: torch.Tensor) -> torch.Tensor:
-        """ Calculates attention scores for each of the mentions.
-
+                     word_ends: torch.Tensor,
+                     n_subtokens) -> torch.Tensor:
+        """ 
         Args:
-            bert_out (torch.Tensor): [n_subwords, bert_emb], bert embeddings
-                for each of the subwords in the document
             word_starts (torch.Tensor): [n_words], start indices of words
             word_ends (torch.Tensor): [n_words], end indices of words
 
         Returns:
             torch.Tensor: [description]
         """
-        n_subtokens = len(bert_out)
         n_words = len(word_starts)
 
         # [n_mentions, n_subtokens]
         # with 0 at positions belonging to the words and -inf elsewhere
-        attn_mask = torch.arange(0, n_subtokens, device=self.device).expand((n_words, n_subtokens))
-        attn_mask = ((attn_mask >= word_starts.unsqueeze(1))
-                     * (attn_mask < word_ends.unsqueeze(1)))
-        attn_mask = torch.log(attn_mask.to(torch.float))
+        sub_to_word = torch.arange(
+            0, n_subtokens, device=self.device).expand((n_words, n_subtokens))
+        sub_to_word = ((sub_to_word >= word_starts.unsqueeze(1))
+                     * (sub_to_word < word_ends.unsqueeze(1))).to(torch.float)
 
-        attn_scores = self.attn(bert_out).T  # [1, n_subtokens]
-        attn_scores = attn_scores.expand((n_words, n_subtokens))
-        attn_scores = attn_mask + attn_scores
-        del attn_mask
-        return torch.softmax(attn_scores, dim=1)  # [n_words, n_subtokens]
+        s = torch.sum(sub_to_word, dim=1)
+
+        return sub_to_word / torch.reshape(s, (-1,1)) 
+
 
     def _cluster_ids(self, doc: Doc) -> torch.Tensor:
         """

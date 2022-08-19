@@ -25,7 +25,7 @@ from coref.rough_scorer import RoughScorer
 from coref.span_predictor import SpanPredictor
 from coref.tokenizer_customization import TOKENIZER_FILTERS, TOKENIZER_MAPS
 from coref.utils import GraphNode
-from coref.word_encoder import WordEncoder
+from coref.attn_encoder import AttnEncoder
 
 import pdb
 
@@ -43,7 +43,7 @@ class CorefModel:  # pylint: disable=too-many-instance-attributes
     Submodules (in the order of their usage in the pipeline):
         tokenizer (transformers.AutoTokenizer)
         bert (transformers.AutoModel)
-        we (WordEncoder)
+        ae (AttnEncoder)
         rough_scorer (RoughScorer)
         pw (PairwiseEncoder)
         a_scorer (AnaphoricityScorer)
@@ -216,8 +216,8 @@ class CorefModel:  # pylint: disable=too-many-instance-attributes
         # Encode words with bert
         # words           [n_words, span_emb]
         # cluster_ids     [n_words]
-        bert_embs, bert_atten = self._bertify(doc)
-        words, cluster_ids = self.we(doc, bert_embs)
+        bert_embs, bert_attns = self._bertify(doc)
+        words, cluster_ids = self.ae(doc, bert_attns)
 
         # Obtain bilinear scores and leave only top-k antecedents for each word
         # top_rough_scores  [n_words, n_ants]
@@ -358,8 +358,9 @@ class CorefModel:  # pylint: disable=too-many-instance-attributes
         attentions = out_dict['attentions'] 
 
         out = out[subword_mask_tensor]
-        attentions = [layer[:,:,subword_mask_tensor[0],:][:,:,:,subword_mask_tensor[0]]
-            for layer in attentions]       
+        attentions = torch.stack(attentions, dim=1) 
+        attentions =\
+            attentions[:,:,:,subword_mask_tensor[0],:][:,:,:,:,subword_mask_tensor[0]]
  
         # [n_subwords, bert_emb]
         return out, attentions
@@ -373,12 +374,15 @@ class CorefModel:  # pylint: disable=too-many-instance-attributes
 
         # pylint: disable=line-too-long
         self.a_scorer = AnaphoricityScorer(pair_emb, self.config).to(self.config.device)
-        self.we = WordEncoder(bert_emb, self.config).to(self.config.device)
+        self.ae = AttnEncoder(
+            self.config.dropout_rate,
+            self.bert.config.num_attention_heads,
+            self.bert.config.num_hidden_layers).to(self.config.device)
         self.rough_scorer = RoughScorer(bert_emb, self.config).to(self.config.device)
         self.sp = SpanPredictor(bert_emb, self.config.sp_embedding_size).to(self.config.device)
 
         self.trainable: Dict[str, torch.nn.Module] = {
-            "bert": self.bert, "we": self.we,
+            "bert": self.bert, "we": self.ae,
             "rough_scorer": self.rough_scorer,
             "pw": self.pw, "a_scorer": self.a_scorer,
             "sp": self.sp
