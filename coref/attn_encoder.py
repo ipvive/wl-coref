@@ -65,7 +65,8 @@ class AttnEncoder(torch.nn.Module):  # pylint: disable=too-many-instance-attribu
         word_coref_attn = torch.matmul(sub_to_word, subword_coref_attn)
         word_coref_attn = torch.matmul(word_coref_attn, sub_to_word.t())
 
-        return (word_coref_attn, self._cluster_ids(doc))
+        # we only have one batch, so we debatch here
+        return word_coref_attn[0]
 
     def _subword_to_word(self,
                      word_starts: torch.Tensor,
@@ -91,23 +92,3 @@ class AttnEncoder(torch.nn.Module):  # pylint: disable=too-many-instance-attribu
         s = torch.sum(sub_to_word, dim=1)
 
         return sub_to_word / torch.reshape(s, (-1,1)) 
-
-
-    def _cluster_ids(self, doc: Doc) -> torch.Tensor:
-        """
-        Args:
-            doc: document information
-
-        Returns:
-            torch.Tensor of shape [n_word], containing cluster indices for
-                each word. Non-coreferent words have cluster id of zero.
-        """
-        word2cluster = {word_i: i
-                        for i, cluster in enumerate(doc["word_clusters"], start=1)
-                        for word_i in cluster}
-
-        return torch.tensor(
-            [word2cluster.get(word_i, 0)
-             for word_i in range(len(doc["cased_words"]))],
-            device=self.device
-        )

@@ -26,6 +26,7 @@ from coref.span_predictor import SpanPredictor
 from coref.tokenizer_customization import TOKENIZER_FILTERS, TOKENIZER_MAPS
 from coref.utils import GraphNode
 from coref.attn_encoder import AttnEncoder
+from coref.word_encoder import WordEncoder
 
 import pdb
 
@@ -217,12 +218,13 @@ class CorefModel:  # pylint: disable=too-many-instance-attributes
         # words           [n_words, span_emb]
         # cluster_ids     [n_words]
         bert_embs, bert_attns = self._bertify(doc)
-        words, cluster_ids = self.ae(doc, bert_attns)
+        words, cluster_ids = self.we(doc, bert_embs)
+        word_coref_attn = self.ae(doc, bert_attns)
 
         # Obtain bilinear scores and leave only top-k antecedents for each word
         # top_rough_scores  [n_words, n_ants]
         # top_indices       [n_words, n_ants]
-        top_rough_scores, top_indices = self.rough_scorer(words)
+        top_rough_scores, top_indices = self.rough_scorer(word_coref_attn)
 
         # Get pairwise features [n_words, n_ants, n_pw_features]
         pw = self.pw(top_indices, doc)
@@ -374,6 +376,7 @@ class CorefModel:  # pylint: disable=too-many-instance-attributes
 
         # pylint: disable=line-too-long
         self.a_scorer = AnaphoricityScorer(pair_emb, self.config).to(self.config.device)
+        self.we = WordEncoder(bert_emb, self.config).to(self.config.device)
         self.ae = AttnEncoder(
             self.config.dropout_rate,
             self.bert.config.num_attention_heads,
@@ -382,9 +385,12 @@ class CorefModel:  # pylint: disable=too-many-instance-attributes
         self.sp = SpanPredictor(bert_emb, self.config.sp_embedding_size).to(self.config.device)
 
         self.trainable: Dict[str, torch.nn.Module] = {
-            "bert": self.bert, "we": self.ae,
+            "bert": self.bert,
+            "we": self.we,
+            "ae": self.ae,
             "rough_scorer": self.rough_scorer,
-            "pw": self.pw, "a_scorer": self.a_scorer,
+            "pw": self.pw,
+            "a_scorer": self.a_scorer,
             "sp": self.sp
         }
 
