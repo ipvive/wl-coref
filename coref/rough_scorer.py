@@ -33,8 +33,8 @@ class RoughScorer(torch.nn.Module):
         pair_mask = torch.log((pair_mask > 0).to(torch.float))
         pair_mask = pair_mask.to(mentions.device)
 
-        #TODO check if we want to mask only diagon or upper triangle (currently the latter)
-        rough_scores = pair_mask + mentions
+        #TODO check if symmetrizing like this is a good idea. note, mask kills upp tri 
+        rough_scores = pair_mask + mentions + mentions.T
 
         return self._prune(rough_scores)
 
